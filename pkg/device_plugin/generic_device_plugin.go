@@ -396,7 +396,6 @@ func (dpi *GenericDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.Al
 					return nil, fmt.Errorf("invalid allocation request: unknown device: %s", dev.addr)
 				}
 
-				devAddrs = append(devAddrs, dev.addr)
 				if dev.addr == bdf {
 					requestedDeviceFound = true
 				}
@@ -411,6 +410,14 @@ func (dpi *GenericDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.Al
 			if !requestedDeviceFound {
 				return nil, fmt.Errorf("invalid allocation request: unknown device: %s", bdf)
 			}
+			// Expose only the requested device's address in this resource's env.
+			// KubeVirt assigns these addresses positionally to the consuming
+			// slots, so advertising the other functions of the IOMMU group lets a
+			// sibling occupy a slot meant for another requested device. The full
+			// group is still bound via the vfio DeviceSpecs below, and each
+			// function is its own resource, so a sibling can be requested directly.
+			devAddrs = append(devAddrs, bdf)
+
 			appendDeviceSpec(&deviceSpecs, seenDeviceSpecs, filepath.Join(vfioDevicePath, "vfio"))
 			appendDeviceSpec(&deviceSpecs, seenDeviceSpecs, filepath.Join(vfioDevicePath, iommuId))
 			if iommufdSupported {
