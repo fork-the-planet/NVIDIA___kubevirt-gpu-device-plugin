@@ -270,6 +270,34 @@ var _ = Describe("Generic Device", func() {
 		}
 	})
 
+	It("Should expose only the requested function, not its IOMMU-group siblings", func() {
+		// A multi-function card: one IOMMU group holds a GPU plus its HD-audio
+		// sibling. When the GPU is requested, only the GPU address must land in
+		// PCI_RESOURCE_NVIDIA_COM_* — not the audio sibling — so KubeVirt does
+		// not map the sibling into another `gpus:` slot (which would displace a
+		// real second GPU). The audio is reachable via its own resource.
+		gpuAddr, audioAddr, grp := "g0", "g1", "9"
+		returnIommuMap = func() map[string][]NvidiaGpuDevice {
+			return map[string][]NvidiaGpuDevice{grp: {{addr: gpuAddr}, {addr: audioAddr}}}
+		}
+		returnBdfToIommuMap = func() map[string]string {
+			return map[string]string{gpuAddr: grp, audioAddr: grp}
+		}
+		readLink = func(basePath, deviceAddress, link string) (string, error) { return grp, nil }
+		readIDFromFile = func(basePath, deviceAddress, link string) (string, error) {
+			return nvVendorID, nil // both functions are NVIDIA (10de)
+		}
+
+		envKey := gpuPrefix + "_FOO"
+		requests := pluginapi.AllocateRequest{}
+		requests.ContainerRequests = append(requests.ContainerRequests,
+			&pluginapi.ContainerAllocateRequest{DevicesIDs: []string{gpuAddr}})
+		responses, err := dpi.Allocate(context.Background(), &requests)
+		Expect(err).To(BeNil())
+		// Only the requested GPU function is exposed; the audio sibling is NOT.
+		Expect(responses.GetContainerResponses()[0].Envs[envKey]).To(Equal(gpuAddr))
+	})
+
 	It("Should allocate a device without error with iommufd support", func() {
 		Expect(os.MkdirAll(filepath.Join(workDir, "dev"), 0744)).To(Succeed())
 		f, err := os.OpenFile(filepath.Join(workDir, "dev", "iommu"), os.O_RDONLY|os.O_CREATE, 0666)
